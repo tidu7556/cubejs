@@ -22,6 +22,13 @@ from views import (
     render_budgets,
 )
 
+# Page configuration (nên đặt trước khi render UI)
+st.set_page_config(
+    page_title="Finance Tracker",
+    page_icon="🤑",
+    layout="wide"
+)
+
 # initialize models
 @st.cache_resource
 def init_models():
@@ -36,97 +43,77 @@ def init_models():
 
 # initialize session per user
 if "models" not in st.session_state:
-    # initialize models
-    st.session_state['models'] = init_models()
+    st.session_state["models"] = init_models()
 
+models = st.session_state["models"]
 
-models = st.session_state['models']
-
-# Page configuration
-st.set_page_config(
-    page_title = "Finance Tracker",
-    page_icon = "🤑",
-    layout = "wide"
-)
 # =============================================
 # 1. Authen User
 # =============================================
-
 def login_screen():
-    with st.container():
-        st.header("This app is private")
-        st.subheader("Please login to continue")
-        st.button("Login with Google", on_click = st.login)
-
-
+    st.header("This app is private")
+    st.subheader("Please login to continue")
+    st.button("Login with Google", on_click=st.login)
 
 user = getattr(st, "user", None)
+is_logged_in = bool(getattr(user, "is_logged_in", False))
 
-# Nếu môi trường không có st.user hoặc không có is_logged_in -> bỏ qua login
-if user is not None and hasattr(user, "is_logged_in"):
-    if not user.is_logged_in:
-        st.warning("Please sign in to continue.")
-        st.stop()
+if (user is None) or (not is_logged_in):
+    login_screen()
+    st.stop()
 
+# Logged-in flow
+user_model: UserModel = models["user"]
+try:
+    mongo_user_id = user_model.login(user.email)
+except Exception as e:
+    st.error(f"Error during user login: {e}")
+    st.stop()
 
-    # set user_id for models
-    # currently we have category and transaction models
-    # you can optimize this by doing it in the model init function
-    models['category'].set_user_id(mongo_user_id)
-    models['transaction'].set_user_id(mongo_user_id)
-     # Budget model cũng cần user_id
-    budget_model = models["budget"]
-    budget_model.set_user_id(mongo_user_id)
+# =============================================
+# 2. Set user context for models
+# =============================================
+models["category"].set_user_id(mongo_user_id)
+models["transaction"].set_user_id(mongo_user_id)
+models["budget"].set_user_id(mongo_user_id)
 
+# =============================================
+# 3. User profile
+# =============================================
+user_dict = user.to_dict()  # convert google user to dict
+user_dict.update({"id": mongo_user_id})
+render_user_profile(user_model, user_dict)
 
-    user = st.user.to_dict() # convert google_user to dict
-    user.update({
-        "id": mongo_user_id
-    })
+# init analyzer (transaction_model already has user_id)
+analyzer_model = FinanceAnalyzer(models["transaction"])
 
-    # Display user profile after update user with mongo_user_id
-    render_user_profile(user_model, user)
+# =============================================
+# 4. Navigation
+# =============================================
+page = st.sidebar.radio("Navigation", ["Home", "Category", "Transaction", "Budget"])
 
-    # init analyzer
-    # because transaction_model has set user_id already in line 74
-    analyzer_model = FinanceAnalyzer(models['transaction'])
-
-    # =============================================
-    # 2. Navigation
-    # =============================================
-
-    page = st.sidebar.radio(
-        "Navigation",
-        ["Home", "Category", "Transaction", "Budget"]
+# =============================================
+# 5. Router
+# =============================================
+if page == "Home":
+    st.title("Home")
+    render_dashboard(
+        analyzer_model=analyzer_model,
+        transaction_model=models["transaction"],
+        visualizer_model=models["visualizer"],
     )
 
+elif page == "Category":
+    render_categories(category_model=models["category"])
 
-    # =============================================
-    # 3. Router
-    # =============================================
-    if page == "Home":
-        st.title("Home")
-        render_dashboard(analyzer_model=analyzer_model, 
-                        transaction_model=models['transaction'],
-                        visualizer_model=models["visualizer"])
+elif page == "Transaction":
+    render_transactions(
+        transaction_model=models["transaction"],
+        category_model=models["category"],
+    )
 
-    elif page == "Category":
-        # get category_model from models
-        category_model = models['category']
-
-        # display category views
-        render_categories(category_model=category_model)
-
-    elif page == "Transaction":
-        # get category_model and transaction from models
-        category_model = models['category']
-        transaction_model = models['transaction']
-
-        # display transaction views
-        render_transactions(transaction_model=transaction_model, category_model=category_model)
-    elif page == "Budget":
-        budget_model = models["budget"]
-        # dùng luôn category_model nếu cần dropdown category
-        category_model = models["category"]
-        render_budgets(budget_model=budget_model,
-                       category_model=category_model)
+elif page == "Budget":
+    render_budgets(
+        budget_model=models["budget"],
+        category_model=models["category"],
+    )
