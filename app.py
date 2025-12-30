@@ -58,16 +58,16 @@ def login_screen():
         st.subheader("Please login to continue")
         st.button("Login with Google", on_click = st.login)
 
-if not st.user.is_logged_in:
-    login_screen()
-else:
-    # Get mongo_user
-    user_model: UserModel = models['user']
-    try:
-        mongo_user_id = user_model.login(st.user.email)
-    except Exception as e:
-        st.error(f"Error during user login: {e}")
+
+
+user = getattr(st, "user", None)
+
+# Nếu môi trường không có st.user hoặc không có is_logged_in -> bỏ qua login
+if user is not None and hasattr(user, "is_logged_in"):
+    if not user.is_logged_in:
+        st.warning("Please sign in to continue.")
         st.stop()
+
 
     # set user_id for models
     # currently we have category and transaction models
